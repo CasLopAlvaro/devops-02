@@ -44,8 +44,7 @@ jobs:
       - name: Analyze with SonarQube
 
         # You can pin the exact commit or the version.
-        # uses: SonarSource/sonarqube-scan-action@v1.1.0
-        uses: SonarSource/sonarqube-scan-action@7295e71c9583053f5bf40e9d4068a0c974603ec8
+        uses: SonarSource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   # Generate a token on SonarQube, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}   # add the URL of your instance to the secrets of this repo with the name SONAR_HOST_URL (Settings > Secrets > Actions > add new repository secret)
@@ -55,3 +54,68 @@ jobs:
             # Unique key of your project. You can find it in SonarQube > [my project] > Project Information (top-right menu)
             # mandatory
             -Dsonar.projectKey=deveops-02
+
+        # Check analysis of sonarque
+      - name: SonarQube Quality Gate check
+      
+        id: sonarqube-quality-gate-check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        # Force to fail step after specific time.
+        timeout-minutes: 5
+        env:
+         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - run: echo "The Quality Gate status is ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }}"
+
+      - name: Find Pull Request
+
+        uses: juliangruber/find-pull-request-action@v1
+        id: find-pull-request
+        with:
+          branch: "main"
+        env:
+          number: ${{ steps.find-pull-request.outputs.number }}
+          sha: ${{ steps.find-pull-request.outputs.head-sha }}
+
+      - name: Deploy
+        if: ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }} == 'PASSED'
+        uses: juliangruber/approve-pull-request-action@v2
+        with:
+          number: ${{ steps.find-pull-request.outputs.number }}
+          #repo: juliangruber/approve-pull-request-action
+
+      - name: Jira Login
+        if: ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }} == 'PASSED'
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          
+      - name: Jira issue:create
+        if: ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }} == 'PASSED'
+        uses: govcms-extras/github-action-jira-create@main
+        with:
+          project: EQ
+          issuetype: Task
+          summary: |
+            Build completed for ${{ github.repository }}
+          #description: |
+          #  Compare branch
+          #fields: '{"customfield_10171": "test"}'
+      
+      - name: Log created issue
+        run: echo "Issue ${{ steps.create.outputs.issue }} was created"
+        
+      - uses: actions/checkout@master
+      - uses: snyk/actions/setup@master
+      - uses: actions/setup-go@v1
+        with:
+          go-version: '1.13'
+      - name: Snyk monitor
+        run: snyk test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        
+
